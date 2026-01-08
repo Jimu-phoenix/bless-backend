@@ -114,23 +114,26 @@ app.get('/api/getOrders', async (req, res) => {
   
   try {
     // Get all orders with their items
-    const query = `
-      SELECT 
-        o.id,
-        o.username,
-        o.email,
-        o.phone_number,
-        json_agg(
-          json_build_object(
-            'product_id', oi.product_id,
-            'qty', oi.qty
-          )
-        ) as items
-      FROM orders o
-      LEFT JOIN order_product oi ON o.id = oi.order_id
-      GROUP BY o.id, o.username, o.email, o.phone_number
-      ORDER BY o.id DESC
-    `;
+    const query = `SELECT 
+          o.id,
+          o.username,
+          o.email,
+          o.phone_number,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'product_id', oi.product_id,
+                'product_name', p.product_name,
+                'qty', oi.qty
+              )
+            ) FILTER (WHERE oi.product_id IS NOT NULL),
+            '[]'::json
+          ) as items
+        FROM orders o
+        LEFT JOIN order_product oi ON o.id = oi.order_id 
+        LEFT JOIN products p ON oi.product_id = p.id
+        GROUP BY o.id, o.username, o.email, o.phone_number
+        ORDER BY o.id DESC;`
 
     const result = await client.query(query);
     res.status(200).json(result.rows);
@@ -289,6 +292,24 @@ app.get('/api/allMessages', async (req, res)=>{
         client.release();
     }
 
+})
+
+app.post('/api/postMessage', async (req, res)=>{
+  const client = await pool.connect();
+  try {
+    
+    const { fullname, email, message } = req.body.blabidi;
+
+    await client.query('INSERT INTO messages (fullname, email, message) VALUES ($1, $2, $3);', [fullname, email, message])
+    
+    res.status(201).json({message: 'Your message was sent Successfully!'})
+  } catch (error) {
+    console.log("Message Post Error: ", error)
+    res.status(500).json({message: 'Your Message was not posted due to an inernal server Error'})
+  }
+  finally{
+    client.release();
+  }
 })
 
 app.get('/api/productsCount', async (req, res)=>{
