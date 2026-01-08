@@ -13,6 +13,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const portNumber = process.env.PORT;
 app.use(cors())
+app.use(express.json());
 
 console.log(portNumber)
 
@@ -50,6 +51,148 @@ app.get('/api/allProducts', async (req, res)=>{
 
 })
 
+app.post('/api/createOrder', async (req, res) =>{
+   const client = await pool.connect();
+    try {
+      
+      const { username, phone, email } = req.body.postData;
+
+      const result = await client.query('INSERT INTO orders (username, email, phone_number) VALUES ($1, $2, $3) RETURNING id;', [username, email, phone])
+      console.log(result.rows[0].id)
+      res.status(200).json({id: result.rows[0].id})
+
+    } catch (error) {
+      console.log("Error: ", error)
+      res.status(500).json({message: "Order Creation Error"})
+    }
+    finally{
+      client.release();
+    }
+})
+app.post('/api/orders/:id', async (req, res) => {
+  const { id } = req.params;
+  const { items } = req.body;
+  const client = await pool.connect();
+
+  try {
+    if (!items || items.length === 0) {
+      return res.status(400).json({ message: 'No items provided' });
+    }
+
+    // Generate placeholders and values
+    const placeholders = [];
+    const values = [];
+    
+    items.forEach((item, i) => {
+      const base = i * 3;
+      placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
+      values.push(id, item.id, item.quantity);
+    });
+
+    const query = `
+      INSERT INTO order_product (order_id, product_id, qty)
+      VALUES ${placeholders.join(', ')}
+    `;
+
+    const result = await client.query(query, values);
+
+    res.status(200).json({ 
+      message: 'Order Placed Successfully'
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ message: 'Failed to add order items' });
+  } finally {
+    client.release();
+  }
+});
+
+// --------------------------Getting and processing orders--------------//
+app.get('/api/getOrders', async (req, res) => {
+  const client = await pool.connect();
+  
+  try {
+    // Get all orders with their items
+    const query = `
+      SELECT 
+        o.id,
+        o.username,
+        o.email,
+        o.phone_number,
+        json_agg(
+          json_build_object(
+            'product_id', oi.product_id,
+            'qty', oi.qty
+          )
+        ) as items
+      FROM orders o
+      LEFT JOIN order_product oi ON o.id = oi.order_id
+      GROUP BY o.id, o.username, o.email, o.phone_number
+      ORDER BY o.id DESC
+    `;
+
+    const result = await client.query(query);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Error fetching orders:', error);
+    res.status(500).json({ message: 'Failed to fetch orders' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/processOrder/:orderId', async (req, res) => {
+  const { orderId } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN'); // Start transaction
+
+    // Get all items for this order
+    const orderItems = await client.query(
+      'SELECT product_id, qty FROM order_items WHERE order_id = $1',
+      [orderId]
+    );
+
+    if (orderItems.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'No items found for this order' });
+    }
+
+    // Update each product and sales record
+    for (const item of orderItems.rows) {
+      // Subtract quantity from products table
+      await client.query(
+        'UPDATE products SET quantity = quantity - $1 WHERE id = $2',
+        [item.qty, item.product_id]
+      );
+
+      // Increment sales.units (assuming sales table has product_id)
+      await client.query(
+        'UPDATE sales SET units = units + $1 WHERE product_id = $2',
+        [item.qty, item.product_id]
+      );
+    }
+
+    await client.query('COMMIT'); // Commit transaction
+
+    res.status(200).json({ 
+      message: 'Order processed successfully',
+      itemsProcessed: orderItems.rows.length 
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK'); // Rollback on error
+    console.error('Error processing order:', error);
+    res.status(500).json({ message: 'Failed to process order' });
+  } finally {
+    client.release();
+  }
+});
+
+//-------------------------End----------------------------------------//
 
 app.get('/api/catMetrics', async (req, res)=>{
 
