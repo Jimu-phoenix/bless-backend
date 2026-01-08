@@ -108,12 +108,30 @@ app.post('/api/orders/:id', async (req, res) => {
   }
 });
 
+app.post('/api/postView', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      
+
+      const result = await client.query('UPDATE views SET count = count + 1 WHERE id = 1;', [])
+      console.log(result)
+      res.status(200).json({message: "View Updated!"})
+
+    } catch (error) {
+      console.log("Error: ", error)
+      res.status(500).json({message: "Views Error"})
+    }
+    finally{
+      client.release();
+    }
+})
+
 // --------------------------Getting and processing orders--------------//
 app.get('/api/getOrders', async (req, res) => {
   const client = await pool.connect();
   
   try {
-    // Get all orders with their items
+    
     const query = `SELECT 
           o.id,
           o.username,
@@ -166,13 +184,12 @@ app.post('/api/processOrder/:orderId', async (req, res) => {
 
     // Update each product and sales record
     for (const item of orderItems.rows) {
-      // Subtract quantity from products table
+
       await client.query(
         'UPDATE products SET quantity = quantity - $1 WHERE id = $2',
         [item.qty, item.product_id]
       );
 
-      // Increment sales.units (assuming sales table has product_id)
       await client.query(
         'UPDATE sales SET units = units + $1 WHERE product_id = $2',
         [item.qty, item.product_id]
@@ -249,13 +266,13 @@ app.get('/api/catMetrics', async (req, res)=>{
 })
 
 
-app.get('/api/sales', async (req, res)=>{
+app.get('/api/views', async (req, res)=>{
 
     const client = await pool.connect();
 
     try {
         
-        const result = await client.query('SELECT units FROM sales');
+        const result = await client.query('SELECT count FROM views');
 
         console.log(result.rows)
         res.status(200).json( result.rows );
