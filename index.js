@@ -311,11 +311,32 @@ app.get('/api/allMessages', async (req, res)=>{
 
 })
 
+// Recaptcha Request
+const verifyRecaptcha = async (token, secretKey) => {
+    const response = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `secret=${secretKey}&response=${token}`
+    });
+    
+    const data = await response.json();
+    return data.success;
+};
+
 app.post('/api/postMessage', async (req, res)=>{
   const client = await pool.connect();
+   const { fullname, email, message, recaptchaToken } = req.body;
+    
+    const isHuman = await verifyRecaptcha(recaptchaToken, process.env.RECAPTCHA_SECRET_V2_KEY);
+    
+    if (!isHuman) {
+        return res.status(400).json({ error: 'reCAPTCHA verification failed' });
+    }
   try {
     
-    const { fullname, email, message } = req.body.blabidi;
+
 
     await client.query('INSERT INTO messages (fullname, email, message) VALUES ($1, $2, $3);', [fullname, email, message])
     
