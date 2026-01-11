@@ -26,6 +26,20 @@ const pool = new Pool({
     port: process.env.PGPORT
 })
 
+
+const verifyRecaptcha = async (token, secretKey) => {
+    const response = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `secret=${secretKey}&response=${token}`
+    });
+    
+    const data = await response.json();
+    return data.success;
+};
+
 app.get('/api/init', (req, res)=>{
     res.status(200).json({message: "Up and Running"})
 })
@@ -53,10 +67,15 @@ app.get('/api/allProducts', async (req, res)=>{
 
 app.post('/api/createOrder', async (req, res) =>{
    const client = await pool.connect();
+
+   const { username, phone, email, recaptchaToken } = req.body.orderData;
+   const isHuman = await verifyRecaptcha(recaptchaToken, process.env.RECAPTCHA_SECRET_V2_KEY);
+    
+    if (!isHuman) {
+        return res.status(400).json({ error: 'reCAPTCHA verification failed' });
+    }
     try {
       
-      const { username, phone, email } = req.body.postData;
-
       const result = await client.query('INSERT INTO orders (username, email, phone_number) VALUES ($1, $2, $3) RETURNING id;', [username, email, phone])
       console.log(result.rows[0].id)
       res.status(200).json({id: result.rows[0].id})
@@ -311,19 +330,6 @@ app.get('/api/allMessages', async (req, res)=>{
 
 })
 
-// Recaptcha Request
-const verifyRecaptcha = async (token, secretKey) => {
-    const response = await fetch('https://www.google.com/recaptcha/api/siteverify', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `secret=${secretKey}&response=${token}`
-    });
-    
-    const data = await response.json();
-    return data.success;
-};
 
 app.post('/api/postMessage', async (req, res)=>{
   const client = await pool.connect();
