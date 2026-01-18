@@ -1,6 +1,3 @@
-// Install dependencies first:
-// npm install @vercel/blob express multer
-
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
@@ -98,7 +95,7 @@ app.post('/api/orders/:id', async (req, res) => {
       return res.status(400).json({ message: 'No items provided' });
     }
 
-    // Generate placeholders and values
+
     const placeholders = [];
     const values = [];
     
@@ -408,10 +405,10 @@ app.put('/api/products/:id', upload.single('file'), async (req, res) => {
     const { id } = req.params;
     const { name, make_model, category, desc, quantity, price } = req.body;
 
-    // Start building the query
+
     let imageUrl = null;
     
-    // If a new file is uploaded, upload to Vercel Blob
+
     if (req.file) {
       const blob = await put(req.file.originalname, req.file.buffer, {
         access: 'public',
@@ -421,7 +418,7 @@ app.put('/api/products/:id', upload.single('file'), async (req, res) => {
       imageUrl = blob.url;
     }
 
-    // Build dynamic update query based on what fields are provided
+
     const updates = [];
     const values = [];
     let paramCount = 1;
