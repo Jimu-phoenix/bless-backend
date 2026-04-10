@@ -257,6 +257,29 @@ app.post("/api/pay/callback", async (req, res) => {
   }
 });
 
+app.post("/api/pay/record", async (req, res) => {
+  const { tx_ref, amount } = req.body;
+
+  if (!tx_ref || !amount) {
+    return res.status(400).json({ error: "Missing tx_ref or amount." });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query(
+      "INSERT INTO sales (tx_ref, amount) VALUES ($1, $2)",
+      [tx_ref, amount]
+    );
+    return res.status(201).json({ message: "Sale recorded." });
+  } catch (err) {
+    console.error("Sale record error:", err);
+    return res.status(500).json({ error: "Failed to record sale." });
+  } finally {
+    client.release();
+  }
+});
+
 app.get("/api/pay/verify", async (req, res) => {
   const { tx_ref } = req.query;
 
