@@ -47,11 +47,8 @@ app.get('/api/allProducts', async (req, res)=>{
     const client = await pool.connect();
 
     try {
-        
         const result = await client.query('SELECT * FROM products');
-
         res.status(200).json( result.rows );
-
 
     } catch (error) {
         console.log("db error", error)
@@ -73,7 +70,6 @@ app.post('/api/createOrder', async (req, res) =>{
         return res.status(400).json({ error: 'reCAPTCHA verification failed' });
     }
     try {
-      
       const result = await client.query('INSERT INTO orders (username, email, phone_number) VALUES ($1, $2, $3) RETURNING id;', [username, email, phone])
       console.log(result.rows[0].id)
       res.status(200).json({id: result.rows[0].id})
@@ -86,6 +82,7 @@ app.post('/api/createOrder', async (req, res) =>{
       client.release();
     }
 })
+
 app.post('/api/orders/:id', async (req, res) => {
   const { id } = req.params;
   const { items } = req.body;
@@ -95,7 +92,6 @@ app.post('/api/orders/:id', async (req, res) => {
     if (!items || items.length === 0) {
       return res.status(400).json({ message: 'No items provided' });
     }
-
 
     const placeholders = [];
     const values = [];
@@ -111,7 +107,7 @@ app.post('/api/orders/:id', async (req, res) => {
       VALUES ${placeholders.join(', ')}
     `;
 
-    const result = await client.query(query, values);
+    await client.query(query, values);
 
     res.status(200).json({ 
       message: 'Order Placed Successfully'
@@ -128,8 +124,6 @@ app.post('/api/orders/:id', async (req, res) => {
 app.post('/api/postView', async (req, res) => {
     const client = await pool.connect();
     try {
-      
-
       const result = await client.query('UPDATE views SET count = count + 1 WHERE id = 1;', [])
       console.log(result)
       res.status(200).json({message: "View Updated!"})
@@ -143,12 +137,10 @@ app.post('/api/postView', async (req, res) => {
     }
 })
 
-// --------------------------Getting and processing orders--------------//
 app.get('/api/getOrders', async (req, res) => {
   const client = await pool.connect();
   
   try {
-    
     const query = `SELECT 
           o.id,
           o.username,
@@ -182,15 +174,9 @@ app.get('/api/getOrders', async (req, res) => {
 });
 
 
-
-// const router = express.Router();
-
 const PAYCHANGU_SECRET_KEY = process.env.PAYCHANGU_SECRET_KEY;
 const PAYCHANGU_BASE_URL = "https://api.paychangu.com";
 
-// ─── Initiate Payment ────────────────────────────────────────────────────────
-// POST /api/pay
-// Body: { amount, currency, email, first_name, last_name }
 app.post("/api/pay", async (req, res) => {
   const { amount, currency = "MWK", email, first_name, last_name } = req.body;
 
@@ -198,7 +184,6 @@ app.post("/api/pay", async (req, res) => {
     return res.status(400).json({ error: "Missing required payment fields." });
   }
 
-  // Generate a unique transaction reference for this payment
   const tx_ref = `txn-${randomUUID()}`;
 
   const payload = {
@@ -208,9 +193,7 @@ app.post("/api/pay", async (req, res) => {
     first_name,
     last_name,
     tx_ref,
-    // PayChangu POSTs to this URL when payment completes (server-to-server)
     callback_url: `${process.env.APP_URL}/api/pay/callback`,
-    // PayChangu redirects the customer's browser here after checkout
     return_url: `${process.env.FRONTEND_URL}/payment/result`,
     customization: {
       title: "My Store",
@@ -236,7 +219,6 @@ app.post("/api/pay", async (req, res) => {
       return res.status(502).json({ error: "Failed to initiate payment." });
     }
 
-    // Return the hosted checkout URL and tx_ref to the React frontend
     return res.json({
       payment_url: data.data.checkout_url,
       tx_ref,
@@ -247,10 +229,11 @@ app.post("/api/pay", async (req, res) => {
   }
 });
 
-// ─── Webhook / Callback ──────────────────────────────────────────────────────
-// POST /api/pay/callback
-// PayChangu calls this server-to-server after a payment attempt.
-// Always verify before fulfilling the order.
+app.get("/api/pay/callback", (req, res) => {
+  const { tx_ref, status } = req.query;
+  return res.redirect(`${process.env.FRONTEND_URL}/payment/result?tx_ref=${tx_ref}&status=${status}`);
+});
+
 app.post("/api/pay/callback", async (req, res) => {
   const { tx_ref, status } = req.body;
 
@@ -262,13 +245,11 @@ app.post("/api/pay/callback", async (req, res) => {
     const verified = await verifyTransaction(tx_ref);
 
     if (verified && verified.status === "success") {
-      // TODO: mark order as paid in your database using tx_ref
       console.log(`Payment confirmed for tx_ref: ${tx_ref}`);
     } else {
       console.warn(`Payment failed or unverified for tx_ref: ${tx_ref}`);
     }
 
-    // Always respond 200 so PayChangu stops retrying the webhook
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error("Callback verification error:", err);
@@ -276,9 +257,6 @@ app.post("/api/pay/callback", async (req, res) => {
   }
 });
 
-// ─── Verify Transaction ──────────────────────────────────────────────────────
-// GET /api/pay/verify?tx_ref=txn-xxxx
-// Called by React on the return_url page to confirm final payment status.
 app.get("/api/pay/verify", async (req, res) => {
   const { tx_ref } = req.query;
 
@@ -295,7 +273,6 @@ app.get("/api/pay/verify", async (req, res) => {
   }
 });
 
-// ─── Shared Verification Helper ──────────────────────────────────────────────
 async function verifyTransaction(tx_ref) {
   const response = await fetch(
     `${PAYCHANGU_BASE_URL}/verify-payment/${tx_ref}`,
@@ -321,9 +298,8 @@ app.post('/api/processOrder/:orderId', async (req, res) => {
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN'); // Start transaction
+    await client.query('BEGIN');
 
-    // Get all items for this order
     const orderItems = await client.query(
       'SELECT product_id, qty FROM order_items WHERE order_id = $1',
       [orderId]
@@ -334,9 +310,7 @@ app.post('/api/processOrder/:orderId', async (req, res) => {
       return res.status(404).json({ message: 'No items found for this order' });
     }
 
-    // Update each product and sales record
     for (const item of orderItems.rows) {
-
       await client.query(
         'UPDATE products SET quantity = quantity - $1 WHERE id = $2',
         [item.qty, item.product_id]
@@ -348,7 +322,7 @@ app.post('/api/processOrder/:orderId', async (req, res) => {
       );
     }
 
-    await client.query('COMMIT'); // Commit transaction
+    await client.query('COMMIT');
 
     res.status(200).json({ 
       message: 'Order processed successfully',
@@ -356,7 +330,7 @@ app.post('/api/processOrder/:orderId', async (req, res) => {
     });
 
   } catch (error) {
-    await client.query('ROLLBACK'); // Rollback on error
+    await client.query('ROLLBACK');
     console.error('Error processing order:', error);
     res.status(500).json({ message: 'Failed to process order' });
   } finally {
@@ -364,14 +338,11 @@ app.post('/api/processOrder/:orderId', async (req, res) => {
   }
 });
 
-//-------------------------End----------------------------------------//
-
 app.get('/api/catMetrics', async (req, res)=>{
 
    const client = await pool.connect();
 
     try {
-        
         const result = await client.query('SELECT category FROM products');
 
         console.log(result.rows)
@@ -423,7 +394,6 @@ app.get('/api/views', async (req, res)=>{
     const client = await pool.connect();
 
     try {
-        
         const result = await client.query('SELECT count FROM views');
 
         console.log(result.rows)
@@ -441,17 +411,13 @@ app.get('/api/views', async (req, res)=>{
 })
 
 
-
 app.get('/api/allMessages', async (req, res)=>{
 
     const client = await pool.connect();
 
     try {
-        
         const result = await client.query('SELECT * FROM messages');
-
         res.status(200).json( result.rows );
-
 
     } catch (error) {
         console.log("db error", error)
@@ -474,11 +440,7 @@ app.post('/api/postMessage', async (req, res)=>{
         return res.status(400).json({ error: 'reCAPTCHA verification failed' });
     }
   try {
-    
-
-
     await client.query('INSERT INTO messages (fullname, email, message) VALUES ($1, $2, $3);', [fullname, email, message])
-    
     res.status(201).json({message: 'Your message was sent Successfully!'})
   } catch (error) {
     console.log("Message Post Error: ", error)
@@ -493,12 +455,8 @@ app.get('/api/productsCount', async (req, res)=>{
   const client = await pool.connect();
 
     try {
-        
         const result = await client.query('SELECT id FROM products');
-
-        // console.log(result)
         res.status(200).json( {count: result.rowCount} );
-
 
     } catch (error) {
         console.log("db error", error)
@@ -509,7 +467,6 @@ app.get('/api/productsCount', async (req, res)=>{
     }
 
 })
-
 
 
 app.get('/api/getProduct/:id', async (req, res)=>{
@@ -517,11 +474,8 @@ app.get('/api/getProduct/:id', async (req, res)=>{
     const client = await pool.connect();
 
     try {
-        
         const result = await client.query('SELECT * FROM products WHERE id = ($1)', [id]);
-
         res.status(200).json( result.rows[0] );
-
 
     } catch (error) {
         console.log("db error", error)
@@ -533,7 +487,6 @@ app.get('/api/getProduct/:id', async (req, res)=>{
 })
 
 
-// Update Route
 app.put('/api/products/:id', upload.single('file'), async (req, res) => {
   const client = await pool.connect();
   
@@ -541,9 +494,7 @@ app.put('/api/products/:id', upload.single('file'), async (req, res) => {
     const { id } = req.params;
     const { name, make_model, category, desc, quantity, price } = req.body;
 
-
     let imageUrl = null;
-    
 
     if (req.file) {
       const blob = await put(req.file.originalname, req.file.buffer, {
@@ -554,58 +505,22 @@ app.put('/api/products/:id', upload.single('file'), async (req, res) => {
       imageUrl = blob.url;
     }
 
-
     const updates = [];
     const values = [];
     let paramCount = 1;
 
-    if (name) {
-      updates.push(`product_name = $${paramCount}`);
-      values.push(name);
-      paramCount++;
-    }
-
-    if (category) {
-      updates.push(`category = $${paramCount}`);
-      values.push(category);
-      paramCount++;
-    }
-
-     if (make_model) {
-      updates.push(`make_model = $${paramCount}`);
-      values.push(make_model);
-      paramCount++;
-    }
-
-     if (quantity) {
-      updates.push(`quantity = $${paramCount}`);
-      values.push(parseInt(quantity));
-      paramCount++;
-    }
-
-    if (desc) {
-      updates.push(`description = $${paramCount}`);
-      values.push(desc);
-      paramCount++;
-    }
-
-    if (price) {
-      updates.push(`price = $${paramCount}`);
-      values.push(parseFloat(price));
-      paramCount++;
-    }
-
-    if (imageUrl) {
-      updates.push(`image_url = $${paramCount}`);
-      values.push(imageUrl);
-      paramCount++;
-    }
+    if (name) { updates.push(`product_name = $${paramCount}`); values.push(name); paramCount++; }
+    if (category) { updates.push(`category = $${paramCount}`); values.push(category); paramCount++; }
+    if (make_model) { updates.push(`make_model = $${paramCount}`); values.push(make_model); paramCount++; }
+    if (quantity) { updates.push(`quantity = $${paramCount}`); values.push(parseInt(quantity)); paramCount++; }
+    if (desc) { updates.push(`description = $${paramCount}`); values.push(desc); paramCount++; }
+    if (price) { updates.push(`price = $${paramCount}`); values.push(parseFloat(price)); paramCount++; }
+    if (imageUrl) { updates.push(`image_url = $${paramCount}`); values.push(imageUrl); paramCount++; }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    // Add id as the last parameter
     values.push(id);
 
     const query = `
@@ -643,7 +558,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     const { name, make_model, category, desc, quantity, price } = req.body;
 
-    // Upload to Vercel Blob
     const blob = await put(req.file.originalname, req.file.buffer, {
       access: 'public',
       token: process.env.BLOB_READ_WRITE_TOKEN,
@@ -651,7 +565,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     });
 
     const client = await pool.connect();
-    const result = await client.query('INSERT INTO products (product_name, make_model, category, description, image_url, price, quantity) VALUES ($1, $2, $3, $4, $5, $6, $7)', [name, make_model, category, desc, blob.url, price, quantity])
+    await client.query('INSERT INTO products (product_name, make_model, category, description, image_url, price, quantity) VALUES ($1, $2, $3, $4, $5, $6, $7)', [name, make_model, category, desc, blob.url, price, quantity])
     client.release();
 
     console.log("Uploaded")
@@ -674,14 +588,12 @@ app.delete('/api/deleteProduct/:id', async (req, res)=>{
     const client = await pool.connect();
 
     try {
-        
         const result = await client.query('DELETE FROM products WHERE id = $1 RETURNING id', [id])
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Product not found' });
         }
 
         res.json({message: 'Successfully Deleted!'})
-
 
     } catch (error) {
         console.log('delete error: ', error)
