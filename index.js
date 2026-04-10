@@ -4,6 +4,7 @@ import multer from 'multer';
 import { put } from '@vercel/blob';
 import cors from 'cors'
 import { Pool } from 'pg';
+import { randomUUID } from 'crypto'
 
 
 const app = express();
@@ -179,6 +180,141 @@ app.get('/api/getOrders', async (req, res) => {
     client.release();
   }
 });
+
+
+
+// const router = express.Router();
+
+const PAYCHANGU_SECRET_KEY = process.env.PAYCHANGU_SECRET_KEY;
+const PAYCHANGU_BASE_URL = "https://api.paychangu.com";
+
+// ─── Initiate Payment ────────────────────────────────────────────────────────
+// POST /api/pay
+// Body: { amount, currency, email, first_name, last_name }
+app.post("/api/pay", async (req, res) => {
+  const { amount, currency = "MWK", email, first_name, last_name } = req.body;
+
+  if (!amount || !email || !first_name || !last_name) {
+    return res.status(400).json({ error: "Missing required payment fields." });
+  }
+
+  // Generate a unique transaction reference for this payment
+  const tx_ref = `txn-${randomUUID()}`;
+
+  const payload = {
+    amount: String(amount),
+    currency,
+    email,
+    first_name,
+    last_name,
+    tx_ref,
+    // PayChangu POSTs to this URL when payment completes (server-to-server)
+    callback_url: `${process.env.APP_URL}/api/pay/callback`,
+    // PayChangu redirects the customer's browser here after checkout
+    return_url: `${process.env.FRONTEND_URL}/payment/result`,
+    customization: {
+      title: "My Store",
+      description: "Order payment",
+    },
+  };
+
+  try {
+    const response = await fetch(`${PAYCHANGU_BASE_URL}/payment`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PAYCHANGU_SECRET_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.status !== "success") {
+      console.error("PayChangu initiation error:", data);
+      return res.status(502).json({ error: "Failed to initiate payment." });
+    }
+
+    // Return the hosted checkout URL and tx_ref to the React frontend
+    return res.json({
+      payment_url: data.data.checkout_url,
+      tx_ref,
+    });
+  } catch (err) {
+    console.error("PayChangu request failed:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// ─── Webhook / Callback ──────────────────────────────────────────────────────
+// POST /api/pay/callback
+// PayChangu calls this server-to-server after a payment attempt.
+// Always verify before fulfilling the order.
+app.post("/api/pay/callback", async (req, res) => {
+  const { tx_ref, status } = req.body;
+
+  if (!tx_ref) {
+    return res.status(400).json({ error: "Missing tx_ref." });
+  }
+
+  try {
+    const verified = await verifyTransaction(tx_ref);
+
+    if (verified && verified.status === "success") {
+      // TODO: mark order as paid in your database using tx_ref
+      console.log(`Payment confirmed for tx_ref: ${tx_ref}`);
+    } else {
+      console.warn(`Payment failed or unverified for tx_ref: ${tx_ref}`);
+    }
+
+    // Always respond 200 so PayChangu stops retrying the webhook
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error("Callback verification error:", err);
+    return res.status(500).json({ error: "Verification failed." });
+  }
+});
+
+// ─── Verify Transaction ──────────────────────────────────────────────────────
+// GET /api/pay/verify?tx_ref=txn-xxxx
+// Called by React on the return_url page to confirm final payment status.
+app.get("/api/pay/verify", async (req, res) => {
+  const { tx_ref } = req.query;
+
+  if (!tx_ref) {
+    return res.status(400).json({ error: "Missing tx_ref." });
+  }
+
+  try {
+    const data = await verifyTransaction(tx_ref);
+    return res.json(data);
+  } catch (err) {
+    console.error("Verification error:", err);
+    return res.status(500).json({ error: "Could not verify transaction." });
+  }
+});
+
+// ─── Shared Verification Helper ──────────────────────────────────────────────
+async function verifyTransaction(tx_ref) {
+  const response = await fetch(
+    `${PAYCHANGU_BASE_URL}/verify-payment/${tx_ref}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${PAYCHANGU_SECRET_KEY}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`PayChangu verification returned ${response.status}`);
+  }
+
+  return response.json();
+}
+
 
 app.post('/api/processOrder/:orderId', async (req, res) => {
   const { orderId } = req.params;
