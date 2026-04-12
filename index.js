@@ -196,7 +196,7 @@ app.post("/api/pay", async (req, res) => {
     callback_url: `${process.env.APP_URL}/api/pay/callback`,
     return_url: `${process.env.FRONTEND_URL}/payment/result`,
     customization: {
-      title: "My Store",
+      title: "Bless Computers",
       description: "Order payment",
     },
   };
@@ -258,9 +258,9 @@ app.post("/api/pay/callback", async (req, res) => {
 });
 
 app.post("/api/pay/record", async (req, res) => {
-  const { tx_ref, amount } = req.body;
+  const { tx_ref, amount, order_id } = req.body;
 
-  if (!tx_ref || !amount) {
+  if (!tx_ref || !amount || !order_id) {
     return res.status(400).json({ error: "Missing tx_ref or amount." });
   }
 
@@ -268,8 +268,8 @@ app.post("/api/pay/record", async (req, res) => {
 
   try {
     await client.query(
-      "INSERT INTO sales (tx_ref, amount) VALUES ($1, $2)",
-      [tx_ref, amount]
+      "INSERT INTO sales (tx_ref, amount, order_id) VALUES ($1, $2, $3)",
+      [tx_ref, amount, order_id]
     );
     return res.status(201).json({ message: "Sale recorded." });
   } catch (err) {
